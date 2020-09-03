@@ -1,0 +1,47 @@
+BASE_TASK_CONFIG_PATH: "configs/navigation/gibson_evaluate_hc2020.yaml"
+TRAINER_NAME: "occant_nav"
+ENV_NAME: "NavRLEnv"
+SIMULATOR_GPU_ID: 0
+SIMULATOR_GPU_IDS: [0]
+TORCH_GPU_ID: 0
+TENSORBOARD_DIR: "pretrained_models/occant_depth_ch/tb/"
+TEST_EPISODE_COUNT: -1
+EVAL_CKPT_PATH_DIR: "pretrained_models/occant_depth_ch/ckpt.13.pth"
+NUM_PROCESSES: 1
+SENSORS: ["RGB_SENSOR", "DEPTH_SENSOR"]
+CHECKPOINT_FOLDER: "pretrained_models/occant_depth_ch"
+T_MAX: 500
+LOG_FILE: "pretrained_models/occant_depth_ch/eval.log"
+PYT_RANDOM_SEED: 123
+
+EVAL:
+  SPLIT: "val"
+  USE_CKPT_CONFIG: False
+
+RL:
+  ANS:
+    goal_success_radius: 0.25 # 2 x agent radius
+    planning_step: 0.25
+    image_scale_hw: [90, 160]
+    crop_map_for_planning: False
+    MAPPER:
+      map_size: 65
+      registration_type: 'moving_average'
+      thresh_entropy: 1.00
+      ignore_pose_estimator: False
+      pose_predictor_inputs: ['rgb', 'depth']
+      use_data_parallel: True
+      gpu_ids: [0]
+      n_pose_layers: 3
+      n_ensemble_layers: 3
+    OCCUPANCY_ANTICIPATOR:
+      type: 'occant_depth'
+      GP_ANTICIPATION:
+        resnet_type: 'resnet18'
+        unet_nsf: 16
+    LOCAL_POLICY:
+      use_heuristic_policy: True
+    PLANNER:
+      use_weighted_graph: True
+      weight_scale: 1.2
+      niters: 3
