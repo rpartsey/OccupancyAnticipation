@@ -5,6 +5,7 @@ SIMULATOR_GPU_ID: 0
 SIMULATOR_GPU_IDS: [0]
 TORCH_GPU_ID: 0
 TENSORBOARD_DIR: "pretrained_models/occant_depth_ch/tb/"
+VIDEO_DIR: "pretrained_models/occant_depth_ch/video_dir_0.1"
 TEST_EPISODE_COUNT: -1
 EVAL_CKPT_PATH_DIR: "pretrained_models/occant_depth_ch/ckpt.13.pth"
 NUM_PROCESSES: 1

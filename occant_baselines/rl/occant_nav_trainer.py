@@ -19,6 +19,8 @@ import torch
 import torch.nn.functional as F
 
 from habitat import Config, logger
+from habitat.utils.visualizations import maps
+from habitat.utils.visualizations.utils import images_to_video
 from habitat_baselines.common.base_trainer import BaseRLTrainer
 from habitat_baselines.common.baseline_registry import baseline_registry
 from occant_baselines.common.env_utils import construct_envs
@@ -382,6 +384,7 @@ class OccAntNavTrainer(BaseRLTrainer):
             self.prev_batch = None
             self.ep_time = torch.zeros(self.envs.num_envs, 1, device=self.device)
             # =========================== Episode loop ================================
+            images = []
             ep_start_time = time.time()
             current_episodes = self.envs.current_episodes()
             for ep_step in range(self.config.T_MAX):
@@ -431,6 +434,12 @@ class OccAntNavTrainer(BaseRLTrainer):
                 observations, _, dones, infos = [list(x) for x in zip(*outputs)]
 
                 times_per_step.append(time.time() - step_start_time)
+
+                im = observations[0]["rgb"]
+                top_down_map = maps.colorize_draw_agent_and_fit_to_height(infos[0]["top_down_map"], im.shape[0])
+                output_im = np.concatenate((im, top_down_map), axis=1)
+                images.append(output_im)
+
                 # ============================ Process metrics ========================
                 if dones[0]:
                     times_per_episode.append(time.time() - ep_start_time)
@@ -466,6 +475,7 @@ class OccAntNavTrainer(BaseRLTrainer):
                         logger.info(f"Time per step: {secs_per_step:.3f} secs")
                         logger.info(f"ETA: {eta_completion:.3f} mins")
 
+                    images_to_video(images, config.VIDEO_DIR, str(ep))
                     # For navigation, terminate episode loop when dones is called
                     break
             # done-for
