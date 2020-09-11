@@ -79,6 +79,12 @@ class OccAntExpTrainer(BaseRLTrainer):
         # Set pytorch random seed for initialization
         torch.manual_seed(config.PYT_RANDOM_SEED)
 
+        if torch.cuda.is_available():
+            # Disable cuDNN to prevent:
+            # RuntimeError: cuDNN error: CUDNN_STATUS_NOT_SUPPORTED.
+            # This error may appear if you passed in a non-contiguous input.
+            torch.backends.cudnn.enabled = False
+
         self.mapper = None
         self.local_actor_critic = None
         self.global_actor_critic = None
