@@ -4,16 +4,17 @@ ENV_NAME: "NavRLEnv"
 SIMULATOR_GPU_ID: 0
 SIMULATOR_GPU_IDS: [0]
 TORCH_GPU_ID: 0
-TENSORBOARD_DIR: "pretrained_models/occant_depth_ch/tb/"
-VIDEO_DIR: "pretrained_models/occant_depth_ch/video_dir_0.1"
-TEST_EPISODE_COUNT: -1
-EVAL_CKPT_PATH_DIR: "pretrained_models/occant_depth_ch/ckpt.13.pth"
 NUM_PROCESSES: 1
 SENSORS: ["RGB_SENSOR", "DEPTH_SENSOR"]
-CHECKPOINT_FOLDER: "pretrained_models/occant_depth_ch"
+TEST_EPISODE_COUNT: -1
 T_MAX: 500
-LOG_FILE: "pretrained_models/occant_depth_ch/eval.log"
 PYT_RANDOM_SEED: 123
+VIDEO_OPTION: ["disk"]
+VIDEO_DIR: "pretrained_models/occant_depth_ch/ckpt.13.pth/video_dir"
+TENSORBOARD_DIR: "pretrained_models/occant_depth_ch/ckpt.13.pth/tb"
+CHECKPOINT_FOLDER: "pretrained_models/occant_depth_ch"
+EVAL_CKPT_PATH_DIR: "pretrained_models/occant_depth_ch/ckpt.13.pth"
+LOG_FILE: "pretrained_models/occant_depth_ch/ckpt.13.pth/eval.log"
 
 EVAL:
   SPLIT: "val"
