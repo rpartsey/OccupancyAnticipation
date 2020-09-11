@@ -1,0 +1,63 @@
+BASE_TASK_CONFIG_PATH: "configs/exploration/gibson_evaluate_noise_free.yaml"
+TRAINER_NAME: "occant_exp"
+ENV_NAME: "ExpRLEnv"
+SIMULATOR_GPU_ID: 0
+SIMULATOR_GPU_IDS: [0]
+TORCH_GPU_ID: 0
+NUM_PROCESSES: 1
+SENSORS: ["RGB_SENSOR", "DEPTH_SENSOR"]
+NUM_EPISODES: 10000
+T_EXP: 500
+VIDEO_OPTION: ["disk"]
+VIDEO_DIR: "pretrained_models/occant_depth/noise_free/ckpt.11.pth/video_dir"
+TENSORBOARD_DIR: "pretrained_models/occant_depth/noise_free/ckpt.11.pth/tb"
+CHECKPOINT_FOLDER: "pretrained_models/occant_depth"
+EVAL_CKPT_PATH_DIR: "pretrained_models/occant_depth/ckpt.11.pth"
+LOG_FILE: "pretrained_models/occant_depth/noise_free/ckpt.11.pth/eval.log"
+
+EVAL:
+  USE_CKPT_CONFIG: False
+
+#RL:
+#  ANS:
+#    goal_success_radius: 0.2 # 2 x agent radius
+#    planning_step: 0.50
+#    image_scale_hw: [128, 128]
+#    MAPPER:
+#      map_size: 65
+#      registration_type: "moving_average"
+#      ignore_pose_estimator: False
+#      use_data_parallel: True
+#      gpu_ids: [0]
+#    OCCUPANCY_ANTICIPATOR:
+#      type: "occant_depth"
+
+
+RL:
+#  PPO:
+#    # ppo params
+#    ppo_epoch: 4
+#    num_mini_batch: 4
+  ANS:
+    reward_type: 'area_seen'
+    image_scale_hw: [128, 128]
+    MAPPER:
+      map_size: 65
+      num_mapper_steps: 100
+      registration_type: 'moving_average'
+      label_id: 'ego_map_gt_anticipated'
+      ignore_pose_estimator: False
+      pose_predictor_inputs: ['ego_map']
+      num_update_batches: 50
+      map_batch_size: 150
+      use_data_parallel: False # True
+      replay_size: 100000
+      gpu_ids: [0] # [1, 2, 3, 4, 5, 6, 7]
+    OCCUPANCY_ANTICIPATOR:
+      type: 'occant_depth'
+      GP_ANTICIPATION:
+        wall_fov: 120.0
+        resnet_type: 'resnet18'
+        unet_nsf: 64
+    LOCAL_POLICY:
+      learning_algorithm: 'rl'
