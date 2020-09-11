@@ -50,9 +50,14 @@ class OccAntNavTrainer(BaseRLTrainer):
         random.seed(config.PYT_RANDOM_SEED)
         np.random.seed(config.PYT_RANDOM_SEED)
         torch.manual_seed(config.PYT_RANDOM_SEED)
+
         if torch.cuda.is_available():
             torch.backends.cudnn.deterministic = True
             torch.backends.cudnn.benchmark = False
+            # Disable cuDNN to prevent:
+            # RuntimeError: cuDNN error: CUDNN_STATUS_NOT_SUPPORTED.
+            # This error may appear if you passed in a non-contiguous input.
+            torch.backends.cudnn.enabled = False
 
         self.mapper = None
         self.local_actor_critic = None
