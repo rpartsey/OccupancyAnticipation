@@ -26,14 +26,23 @@ from habitat_baselines.common.baseline_registry import baseline_registry
 from occant_baselines.common.env_utils import construct_envs
 from habitat_baselines.common.environments import get_env_class
 from habitat_baselines.common.tensorboard_utils import TensorboardWriter
-from habitat_baselines.common.utils import batch_obs
+from habitat_baselines.common.utils import batch_obs, generate_video
 from occant_baselines.rl.ans import ActiveNeuralSLAMNavigator
 from occant_baselines.rl.policy_utils import OccupancyAnticipationWrapper
-from occant_utils.common import add_pose
+from occant_utils.common import add_pose, convert_world2map, convert_gt2channel_to_gtrgb
 from occant_utils.metrics import Metric
 from occant_baselines.models.mapnet import DepthProjectionNet
 from occant_baselines.models.occant import OccupancyAnticipator
-from einops import rearrange
+from einops import rearrange, asnumpy
+from occant_utils.metrics import (
+    measure_pose_estimation_performance,
+    measure_area_seen_performance,
+    measure_anticipation_reward,
+    measure_map_quality,
+    TemporalMetric,
+)
+from habitat_extensions.utils import observations_to_image
+from occant_utils.visualization import generate_topdown_allocentric_map
 
 
 @baseline_registry.register_trainer(name="occant_nav")
@@ -241,6 +250,41 @@ class OccAntNavTrainer(BaseRLTrainer):
 
         return batch
 
+    # def _prepare_batch(self, observations, prev_batch=None, device=None, actions=None):
+    #     imH, imW = self.config.RL.ANS.image_scale_hw
+    #     device = self.device if device is None else device
+    #     batch = batch_obs(observations, device=device)
+    #     if batch["rgb"].size(1) != imH or batch["rgb"].size(2) != imW:
+    #         rgb = rearrange(batch["rgb"], "b h w c -> b c h w")
+    #         rgb = F.interpolate(rgb, (imH, imW), mode="bilinear")
+    #         batch["rgb"] = rearrange(rgb, "b c h w -> b h w c")
+    #     if batch["depth"].size(1) != imH or batch["depth"].size(2) != imW:
+    #         depth = rearrange(batch["depth"], "b h w c -> b c h w")
+    #         depth = F.interpolate(depth, (imH, imW), mode="nearest")
+    #         batch["depth"] = rearrange(depth, "b c h w -> b h w c")
+    #     # Compute ego_map_gt from depth
+    #     ego_map_gt_b = self.depth_projection_net(
+    #         rearrange(batch["depth"], "b h w c -> b c h w")
+    #     )
+    #     batch["ego_map_gt"] = rearrange(ego_map_gt_b, "b c h w -> b h w c")
+    #     if actions is None:
+    #         # Initialization condition
+    #         # If pose estimates are not available, set the initial estimate to zeros.
+    #         if "pose" not in batch:
+    #             # Set initial pose estimate to zero
+    #             batch["pose"] = torch.zeros(self.envs.num_envs, 3).to(self.device)
+    #         batch["prev_actions"] = torch.zeros(self.envs.num_envs, 1).to(self.device)
+    #     else:
+    #         # Rollouts condition
+    #         # If pose estimates are not available, compute them from action taken.
+    #         if "pose" not in batch:
+    #             assert prev_batch is not None
+    #             actions_delta = self._convert_actions_to_delta(actions)
+    #             batch["pose"] = add_pose(prev_batch["pose"], actions_delta)
+    #         batch["prev_actions"] = actions
+    #
+    #     return batch
+
     def train(self) -> None:
         r"""Main method for training PPO.
 
@@ -280,6 +324,14 @@ class OccAntNavTrainer(BaseRLTrainer):
         config.TASK_CONFIG.DATASET.SPLIT = config.EVAL.SPLIT
         config.freeze()
 
+        if "COLLISION_SENSOR" not in config.TASK_CONFIG.TASK.SENSORS:
+            config.TASK_CONFIG.TASK.SENSORS.append("COLLISION_SENSOR")
+        if len(self.config.VIDEO_OPTION) > 0:
+            config.defrost()
+            config.TASK_CONFIG.TASK.MEASUREMENTS.append("TOP_DOWN_MAP_EXP")
+            config.TASK_CONFIG.TASK.MEASUREMENTS.append("COLLISIONS")
+            config.freeze()
+
         self.envs = construct_envs(config, get_env_class(config.ENV_NAME))
         self._setup_actor_critic_agent(ppo_cfg, ans_cfg)
 
@@ -297,6 +349,11 @@ class OccAntNavTrainer(BaseRLTrainer):
         # pose_estimator is not required.
         self.mapper.load_state_dict(mapper_dict, strict=False)
         self.local_actor_critic.load_state_dict(local_dict)
+
+        rgb_frames = [[] for _ in range(self.config.NUM_PROCESSES)]
+
+        if len(self.config.VIDEO_OPTION) > 0:
+            os.makedirs(self.config.VIDEO_DIR, exist_ok=True)
 
         # Set models to evaluation
         self.mapper.eval()
@@ -319,6 +376,10 @@ class OccAntNavTrainer(BaseRLTrainer):
         V = ans_cfg.MAPPER.map_size
         s = ans_cfg.MAPPER.map_scale
         imH, imW = ans_cfg.image_scale_hw
+
+        # Define metric accumulators
+        mapping_metrics = defaultdict(lambda: TemporalMetric())
+        pose_estimation_metrics = defaultdict(lambda: TemporalMetric())
 
         assert (
             self.envs.num_envs == 1
@@ -381,15 +442,48 @@ class OccAntNavTrainer(BaseRLTrainer):
                 "recurrent_hidden_states": torch.zeros(
                     1, self.envs.num_envs, ans_cfg.LOCAL_POLICY.hidden_size
                 ).to(self.device),
+                "visited_states": torch.zeros(self.envs.num_envs, 1, M, M).to(
+                    self.device
+                ),
             }
+            ground_truth_states = {
+                "visible_occupancy": torch.zeros(self.envs.num_envs, 2, M, M).to(
+                    self.device
+                ),
+                "pose": torch.zeros(self.envs.num_envs, 3).to(self.device),
+                "environment_layout": None,
+            }
+
             # Reset ANS states
             self.ans_net.reset()
             self.not_done_masks = torch.zeros(self.envs.num_envs, 1, device=self.device)
             self.prev_actions = torch.zeros(self.envs.num_envs, 1, device=self.device)
             self.prev_batch = None
             self.ep_time = torch.zeros(self.envs.num_envs, 1, device=self.device)
+
+            # Visualization stuff
+            gt_agent_poses_over_time = [[] for _ in range(self.config.NUM_PROCESSES)]
+            pred_agent_poses_over_time = [[] for _ in range(self.config.NUM_PROCESSES)]
+            gt_map_agent = asnumpy(
+                convert_world2map(ground_truth_states["pose"], (M, M), s)
+            )
+            pred_map_agent = asnumpy(
+                convert_world2map(state_estimates["pose_estimates"], (M, M), s)
+            )
+            pred_map_agent = np.concatenate(
+                [pred_map_agent, asnumpy(state_estimates["pose_estimates"][:, 2:3]), ],
+                axis=1,
+            )
+            for i in range(self.config.NUM_PROCESSES):
+                gt_agent_poses_over_time[i].append(gt_map_agent[i])
+                pred_agent_poses_over_time[i].append(pred_map_agent[i])
+
+            # Environment statistics
+            episode_statistics = []
+            episode_visualization_maps = []
+
             # =========================== Episode loop ================================
-            images = []
+            # images = []
             ep_start_time = time.time()
             current_episodes = self.envs.current_episodes()
             for ep_step in range(self.config.T_MAX):
@@ -433,6 +527,38 @@ class OccAntNavTrainer(BaseRLTrainer):
                 # Remap actions from exploration to navigation agent.
                 actions_rmp = self._remap_actions(actions)
 
+                # Update GT estimates at t = ep_step
+                ground_truth_states["pose"] = batch["pose_gt"]
+                ground_truth_states[
+                    "visible_occupancy"
+                ] = self.ans_net.mapper.ext_register_map(
+                    ground_truth_states["visible_occupancy"],
+                    batch["ego_map_gt"].permute(0, 3, 1, 2),
+                    batch["pose_gt"],
+                )
+
+                # Visualization stuff
+                gt_map_agent = asnumpy(
+                    convert_world2map(ground_truth_states["pose"], (M, M), s)
+                )
+                gt_map_agent = np.concatenate(
+                    [gt_map_agent, asnumpy(ground_truth_states["pose"][:, 2:3])],
+                    axis=1,
+                )
+                pred_map_agent = asnumpy(
+                    convert_world2map(state_estimates["pose_estimates"], (M, M), s)
+                )
+                pred_map_agent = np.concatenate(
+                    [
+                        pred_map_agent,
+                        asnumpy(state_estimates["pose_estimates"][:, 2:3]),
+                    ],
+                    axis=1,
+                )
+                for i in range(self.config.NUM_PROCESSES):
+                    gt_agent_poses_over_time[i].append(gt_map_agent[i])
+                    pred_agent_poses_over_time[i].append(pred_map_agent[i])
+
                 # =========================== Environment step ========================
                 outputs = self.envs.step([a[0].item() for a in actions_rmp])
 
@@ -440,10 +566,64 @@ class OccAntNavTrainer(BaseRLTrainer):
 
                 times_per_step.append(time.time() - step_start_time)
 
-                im = observations[0]["rgb"]
-                top_down_map = maps.colorize_draw_agent_and_fit_to_height(infos[0]["top_down_map"], im.shape[0])
-                output_im = np.concatenate((im, top_down_map), axis=1)
-                images.append(output_im)
+                if ep_step == 0:
+                    environment_layout = np.stack(
+                        [info["gt_global_map"] for info in infos], axis=0
+                    )  # (bs, M, M, 2)
+                    environment_layout = rearrange(
+                        environment_layout, "b h w c -> b c h w"
+                    )  # (bs, 2, M, M)
+                    environment_layout = torch.Tensor(environment_layout).to(
+                        self.device
+                    )
+                    ground_truth_states["environment_layout"] = environment_layout
+                    # Update environment statistics
+                    for i in range(self.envs.num_envs):
+                        episode_statistics.append(infos[i]["episode_statistics"])
+
+                # TopDownMap visualizations
+                # im = observations[0]["rgb"]
+                # top_down_map = maps.colorize_draw_agent_and_fit_to_height(infos[0]["top_down_map"], im.shape[0])
+                # output_im = np.concatenate((im, top_down_map), axis=1)
+                # images.append(output_im)
+
+                # prev_batch = batch
+                # batch = self._prepare_batch(observations, prev_batch, actions=actions)
+
+                if ep_step == 0 or (ep_step + 1) % 50 == 0:
+                    curr_all_metrics = {}
+                    # Compute accumulative pose estimation error
+                    pose_hat_final = state_estimates["pose_estimates"]  # (bs, 3)
+                    pose_gt_final = ground_truth_states["pose"]  # (bs, 3)
+                    curr_pose_estimation_metrics = measure_pose_estimation_performance(
+                        pose_hat_final, pose_gt_final, reduction="sum",
+                    )
+                    for k, v in curr_pose_estimation_metrics.items():
+                        pose_estimation_metrics[k].update(
+                            v, self.envs.num_envs, ep_step
+                        )
+                    curr_all_metrics.update(curr_pose_estimation_metrics)
+
+                    # Compute map quality
+                    curr_map_quality_metrics = measure_map_quality(
+                        state_estimates["map_states"],
+                        ground_truth_states["environment_layout"],
+                        s,
+                        entropy_thresh=1.0,
+                        reduction="sum",
+                        apply_mask=True,
+                    )
+                    for k, v in curr_map_quality_metrics.items():
+                        mapping_metrics[k].update(v, self.envs.num_envs, ep_step)
+                    curr_all_metrics.update(curr_map_quality_metrics)
+
+                    # Compute area seen
+                    curr_area_seen_metrics = measure_area_seen_performance(
+                        ground_truth_states["visible_occupancy"], s, reduction="sum"
+                    )
+                    for k, v in curr_area_seen_metrics.items():
+                        mapping_metrics[k].update(v, self.envs.num_envs, ep_step)
+                    curr_all_metrics.update(curr_area_seen_metrics)
 
                 # ============================ Process metrics ========================
                 if dones[0]:
@@ -480,9 +660,121 @@ class OccAntNavTrainer(BaseRLTrainer):
                         logger.info(f"Time per step: {secs_per_step:.3f} secs")
                         logger.info(f"ETA: {eta_completion:.3f} mins")
 
-                    images_to_video(images, config.VIDEO_DIR, str(ep))
+                    episode_visualization_maps.append(rgb_frames[0][-1])
+                    video_metrics = {}
+                    for k in ["area_seen", "mean_iou", "map_accuracy"]:
+                        video_metrics[k] = curr_all_metrics[k]
+                    if len(self.config.VIDEO_OPTION) > 0:
+                        generate_video(
+                            video_option=self.config.VIDEO_OPTION,
+                            video_dir=self.config.VIDEO_DIR,
+                            images=rgb_frames[0],
+                            episode_id=current_episodes[0].episode_id,
+                            checkpoint_idx=checkpoint_index,
+                            metrics=video_metrics,
+                            tb_writer=writer,
+                        )
+
+                        rgb_frames[0] = []
+
+                    # images_to_video(images, config.VIDEO_DIR, str(ep))
                     # For navigation, terminate episode loop when dones is called
                     break
+                else:
+                    frame = observations_to_image(
+                        observations[0], infos[0], observation_size=300
+                    )
+                    # Add ego_map_gt to frame
+                    ego_map_gt_i = asnumpy(batch["ego_map_gt"][0])  # (2, H, W)
+                    ego_map_gt_i = convert_gt2channel_to_gtrgb(ego_map_gt_i)
+                    ego_map_gt_i = cv2.resize(ego_map_gt_i, (300, 300))
+                    frame = np.concatenate([frame, ego_map_gt_i], axis=1)
+                    # Generate ANS specific visualizations
+                    environment_layout = asnumpy(
+                        ground_truth_states["environment_layout"][0]
+                    )  # (2, H, W)
+                    visible_occupancy = asnumpy(
+                        ground_truth_states["visible_occupancy"][0]
+                    )  # (2, H, W)
+                    curr_gt_poses = gt_agent_poses_over_time[0]
+                    anticipated_occupancy = asnumpy(
+                        state_estimates["map_states"][0]
+                    )  # (2, H, W)
+                    curr_pred_poses = pred_agent_poses_over_time[0]
+
+                    H = frame.shape[0]
+                    visible_occupancy_vis = generate_topdown_allocentric_map(
+                        environment_layout,
+                        visible_occupancy,
+                        curr_gt_poses,
+                        thresh_explored=ans_cfg.thresh_explored,
+                        thresh_obstacle=ans_cfg.thresh_obstacle,
+                    )
+                    visible_occupancy_vis = cv2.resize(
+                        visible_occupancy_vis, (H, H)
+                    )
+                    anticipated_occupancy_vis = generate_topdown_allocentric_map(
+                        environment_layout,
+                        anticipated_occupancy,
+                        curr_pred_poses,
+                        thresh_explored=ans_cfg.thresh_explored,
+                        thresh_obstacle=ans_cfg.thresh_obstacle,
+                    )
+                    anticipated_occupancy_vis = cv2.resize(
+                        anticipated_occupancy_vis, (H, H)
+                    )
+                    anticipated_action_map = generate_topdown_allocentric_map(
+                        environment_layout,
+                        anticipated_occupancy,
+                        curr_pred_poses,
+                        zoom=False,
+                        thresh_explored=ans_cfg.thresh_explored,
+                        thresh_obstacle=ans_cfg.thresh_obstacle,
+                    )
+                    global_goals = self.ans_net.states["curr_global_goals"]
+                    local_goals = self.ans_net.states["curr_local_goals"]
+                    if global_goals is not None:
+                        cX = int(global_goals[0, 0].item())
+                        cY = int(global_goals[0, 1].item())
+                        anticipated_action_map = cv2.circle(
+                            anticipated_action_map,
+                            (cX, cY),
+                            10,
+                            (255, 0, 0),
+                            -1,
+                        )
+                    if local_goals is not None:
+                        cX = int(local_goals[0, 0].item())
+                        cY = int(local_goals[0, 1].item())
+                        anticipated_action_map = cv2.circle(
+                            anticipated_action_map,
+                            (cX, cY),
+                            10,
+                            (0, 255, 255),
+                            -1,
+                        )
+                    anticipated_action_map = cv2.resize(
+                        anticipated_action_map, (H, H)
+                    )
+
+                    maps_vis = np.concatenate(
+                        [
+                            visible_occupancy_vis,
+                            anticipated_occupancy_vis,
+                            anticipated_action_map,
+                            np.zeros(
+                                [
+                                    frame.shape[0],
+                                    frame.shape[1] - visible_occupancy_vis.shape[1] - anticipated_occupancy_vis.shape[1] - anticipated_action_map.shape[1],
+                                    3
+                                 ]
+                            ),
+                        ],
+                        axis=1,
+                    )
+                    frame = np.concatenate([frame, maps_vis], axis=0)
+
+                    rgb_frames[0].append(frame)
             # done-for
 
         if checkpoint_index == 0:
