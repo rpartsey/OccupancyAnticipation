@@ -43,7 +43,8 @@ from occant_utils.metrics import (
 )
 from habitat_extensions.utils import observations_to_image
 from occant_utils.visualization import generate_topdown_allocentric_map
-
+import matplotlib.pyplot as plt
+from PIL import Image, ImageDraw, ImageFont
 
 @baseline_registry.register_trainer(name="occant_nav")
 class OccAntNavTrainer(BaseRLTrainer):
@@ -661,9 +662,9 @@ class OccAntNavTrainer(BaseRLTrainer):
                         logger.info(f"ETA: {eta_completion:.3f} mins")
 
                     episode_visualization_maps.append(rgb_frames[0][-1])
-                    video_metrics = {}
-                    for k in ["area_seen", "mean_iou", "map_accuracy"]:
-                        video_metrics[k] = curr_all_metrics[k]
+                    # video_metrics = {}
+                    # for k in ["area_seen", "mean_iou", "map_accuracy"]:
+                    #     video_metrics[k] = curr_all_metrics[k]
                     if len(self.config.VIDEO_OPTION) > 0:
                         generate_video(
                             video_option=self.config.VIDEO_OPTION,
@@ -671,9 +672,16 @@ class OccAntNavTrainer(BaseRLTrainer):
                             images=rgb_frames[0],
                             episode_id=current_episodes[0].episode_id,
                             checkpoint_idx=checkpoint_index,
-                            metrics=video_metrics,
+                            metrics=curr_metrics,  # video_metrics,
                             tb_writer=writer,
                         )
+
+                        if self.config.SAVE_IMAGES:
+                            images_dir = os.path.join(self.config.VIDEO_DIR, str(ep))
+                            os.makedirs(images_dir)
+
+                            for idx, image in enumerate(rgb_frames[0]):
+                                plt.imsave(os.path.join(images_dir, f"{str(idx).zfill(3)}.png"), image)
 
                         rgb_frames[0] = []
 
@@ -772,9 +780,40 @@ class OccAntNavTrainer(BaseRLTrainer):
                         ],
                         axis=1,
                     )
+
+                    pose_hat_final = state_estimates["pose_estimates"]  # (bs, 3)
+                    pose_gt_final = ground_truth_states["pose"]  # (bs, 3)
+                    curr_pose_estimation_metrics = measure_pose_estimation_performance(
+                        pose_hat_final, pose_gt_final, reduction="sum",
+                    )
+
                     frame = np.concatenate([frame, maps_vis], axis=0)
 
+                    if self.config.DRAW_METRICS:
+                        frame = np.pad(frame, ((40, 0), (0, 0), (0, 0)), mode='constant', constant_values=255)
+
+                        img = Image.fromarray(np.clip(frame, 0, 255).astype(np.uint8))
+                        draw = ImageDraw.Draw(img)
+
+                        metrics_text = (
+                            f"gt: {str(np.round(pose_gt_final.cpu().numpy(), 3))}, "
+                            f"pred: {str(np.round(pose_hat_final.cpu().numpy(), 3))}, "
+                            f"translation_e: {np.round(curr_pose_estimation_metrics['translation_error'], 3)}, "
+                            f"rotation_e: {np.round(curr_pose_estimation_metrics['angular_error'], 3)}"
+                        )
+
+                        draw.text(
+                            xy=(5, 5),
+                            text=metrics_text,
+                            fill='rgb(0, 0, 0)',
+                            font=ImageFont.truetype(os.environ['UBUNTU_MONO_FONT_PATH'], size=20)
+                        )
+
+                        frame = np.array(img)
+
                     rgb_frames[0].append(frame)
+
+                    # plt.imsave(f'/home/rpartsey/code/3d-navigation/related_works/occupancy_anticipation/OccupancyAnticipation/pretrained_models/occant_depth_ch/noisy/ckpt.13.pth_map_vis_debug/frames/{str(len(rgb_frames[0])).zfill(2)}_{actions_rmp.item()}.png', frame)
             # done-for
 
         if checkpoint_index == 0:
