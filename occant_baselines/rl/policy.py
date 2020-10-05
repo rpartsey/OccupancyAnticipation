@@ -578,11 +578,11 @@ class Mapper(nn.Module):
             xys_newimg[:, :, 1] *= -1  # (bs, HW, 2)
             # ================== Apply warp to RGB, Depth images ==================
             sampler = rearrange(xys_newimg, "b (h w) f -> b h w f", h=H, w=W)
-            depth_t_1_trans = F.grid_sample(depth_t_1, sampler, padding_mode="zeros")
+            depth_t_1_trans = F.grid_sample(depth_t_1, sampler, padding_mode="zeros", align_corners=True)
             inputs["depth_t_1"] = depth_t_1_trans
             if "rgb_t_1" in inputs:
                 rgb_t_1 = inputs["rgb_t_1"]
-                rgb_t_1_trans = F.grid_sample(rgb_t_1, sampler, padding_mode="zeros")
+                rgb_t_1_trans = F.grid_sample(rgb_t_1, sampler, padding_mode="zeros", align_corners=True)
                 inputs["rgb_t_1"] = rgb_t_1_trans
 
         return inputs
