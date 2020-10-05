@@ -14,6 +14,8 @@ GT_OBSTACLE_COLOR = (204, 204, 204)
 CORRECT_OBSTACLE_COLOR = (51, 102, 0)
 FALSE_OBSTACLE_COLOR = (102, 204, 0)
 TRAJECTORY_COLOR = (0, 0, 0)
+RED = (255, 0, 0)
+YELLOW = (255, 255, 0)
 
 
 def draw_triangle(image, position, theta, radius=30, color=(0, 0, 0)):
@@ -51,6 +53,8 @@ def generate_topdown_allocentric_map(
     zoom=True,
     draw_trajectory=False,
     draw_agent=True,
+    agent_positions2=None,
+    agent_positions3=None
 ):
     """
     Inputs:
@@ -87,6 +91,24 @@ def generate_topdown_allocentric_map(
         for pose in agent_positions_subsampled:
             x, y = pose[:2]
             colored_map = cv2.circle(colored_map, (x, y), 2, TRAJECTORY_COLOR, -1)
+
+    if agent_positions3 is not None:
+        colored_map = draw_triangle(
+            colored_map,
+            agent_positions3[-1][:2].tolist(),
+            agent_positions3[-1][2].item(),
+            radius=15,
+            color=YELLOW,
+        )
+
+    if agent_positions2 is not None:
+        colored_map = draw_triangle(
+            colored_map,
+            agent_positions2[-1][:2].tolist(),
+            agent_positions2[-1][2].item(),
+            radius=15,
+            color=RED,
+        )
 
     if draw_agent:
         colored_map = draw_triangle(

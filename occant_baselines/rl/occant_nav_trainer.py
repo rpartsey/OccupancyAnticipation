@@ -351,7 +351,7 @@ class OccAntNavTrainer(BaseRLTrainer):
         self.mapper.load_state_dict(mapper_dict, strict=False)
         self.local_actor_critic.load_state_dict(local_dict)
 
-        rgb_frames = [[] for _ in range(self.config.NUM_PROCESSES)]
+        # rgb_frames = [[] for _ in range(self.config.NUM_PROCESSES)]
 
         if len(self.config.VIDEO_OPTION) > 0:
             os.makedirs(self.config.VIDEO_DIR, exist_ok=True)
@@ -481,7 +481,13 @@ class OccAntNavTrainer(BaseRLTrainer):
 
             # Environment statistics
             episode_statistics = []
-            episode_visualization_maps = []
+            # episode_visualization_maps = []
+
+            # Map correction
+            # gt_poses = []
+            # est_poses = []
+            # ego_maps = []
+            # occant_maps = []
 
             # =========================== Episode loop ================================
             # images = []
@@ -538,6 +544,12 @@ class OccAntNavTrainer(BaseRLTrainer):
                     batch["pose_gt"],
                 )
 
+                # Map correction
+                # gt_poses.append(batch["pose_gt"].cpu().numpy())
+                # est_poses.append(state_estimates["pose_estimates"].cpu().numpy())
+                # ego_maps.append(batch["ego_map_gt"].permute(0, 3, 1, 2).squeeze().cpu().numpy())
+                # occant_maps.append(mapper_outputs['pt'].squeeze().cpu().numpy())
+
                 # Visualization stuff
                 gt_map_agent = asnumpy(
                     convert_world2map(ground_truth_states["pose"], (M, M), s)
@@ -574,6 +586,7 @@ class OccAntNavTrainer(BaseRLTrainer):
                     environment_layout = rearrange(
                         environment_layout, "b h w c -> b c h w"
                     )  # (bs, 2, M, M)
+
                     environment_layout = torch.Tensor(environment_layout).to(
                         self.device
                     )
@@ -657,161 +670,177 @@ class OccAntNavTrainer(BaseRLTrainer):
                         for k, v in curr_metrics.items():
                             logger.info(f"{k:25s} : {v:10.3f}")
                         logger.info("{:25s} : {:10d}".format("episode_id", episode_id))
+                        logger.info("{:25s} : {}".format("scene_id", current_episodes[i].scene_id))
                         logger.info(f"Time per episode: {mins_per_episode:.3f} mins")
                         logger.info(f"Time per step: {secs_per_step:.3f} secs")
                         logger.info(f"ETA: {eta_completion:.3f} mins")
 
-                    episode_visualization_maps.append(rgb_frames[0][-1])
+                    # episode_visualization_maps.append(rgb_frames[0][-1])
+
                     # video_metrics = {}
                     # for k in ["area_seen", "mean_iou", "map_accuracy"]:
                     #     video_metrics[k] = curr_all_metrics[k]
-                    if len(self.config.VIDEO_OPTION) > 0:
-                        generate_video(
-                            video_option=self.config.VIDEO_OPTION,
-                            video_dir=self.config.VIDEO_DIR,
-                            images=rgb_frames[0],
-                            episode_id=current_episodes[0].episode_id,
-                            checkpoint_idx=checkpoint_index,
-                            metrics=curr_metrics,  # video_metrics,
-                            tb_writer=writer,
-                        )
+                    # if len(self.config.VIDEO_OPTION) > 0:
+                    #     generate_video(
+                    #         video_option=self.config.VIDEO_OPTION,
+                    #         video_dir=self.config.VIDEO_DIR,
+                    #         images=rgb_frames[0],
+                    #         episode_id=current_episodes[0].episode_id,
+                    #         checkpoint_idx=checkpoint_index,
+                    #         metrics=curr_metrics,  # video_metrics,
+                    #         tb_writer=writer,
+                    #     )
+                    #
+                    #     if self.config.SAVE_IMAGES:
+                    #         images_dir = os.path.join(self.config.VIDEO_DIR, str(ep))
+                    #         os.makedirs(images_dir)
+                    #
+                    #         for idx, image in enumerate(rgb_frames[0]):
+                    #             plt.imsave(os.path.join(images_dir, f"{str(idx).zfill(3)}.png"), image)
+                    #
+                    # rgb_frames[0] = []
 
-                        if self.config.SAVE_IMAGES:
-                            images_dir = os.path.join(self.config.VIDEO_DIR, str(ep))
-                            os.makedirs(images_dir)
+                    # episode_path = os.path.join(self.config.VIDEO_DIR, str(ep).zfill(3))
+                    # os.makedirs(episode_path)
+                    #
+                    # np.save(os.path.join(episode_path, 'gt_poses.npy'), np.array(gt_poses))
+                    # np.save(os.path.join(episode_path, 'est_poses.npy'), np.array(est_poses))
+                    # np.save(os.path.join(episode_path, 'ego_maps.npy'), np.array(ego_maps))
+                    # np.save(os.path.join(episode_path, 'occant_maps.npy'), np.array(occant_maps))
 
-                            for idx, image in enumerate(rgb_frames[0]):
-                                plt.imsave(os.path.join(images_dir, f"{str(idx).zfill(3)}.png"), image)
-
-                        rgb_frames[0] = []
+                    # Map correction
+                    # gt_poses = []
+                    # est_poses = []
+                    # ego_maps = []
+                    # occant_maps = []
 
                     # images_to_video(images, config.VIDEO_DIR, str(ep))
                     # For navigation, terminate episode loop when dones is called
                     break
-                else:
-                    frame = observations_to_image(
-                        observations[0], infos[0], observation_size=300
-                    )
-                    # Add ego_map_gt to frame
-                    ego_map_gt_i = asnumpy(batch["ego_map_gt"][0])  # (2, H, W)
-                    ego_map_gt_i = convert_gt2channel_to_gtrgb(ego_map_gt_i)
-                    ego_map_gt_i = cv2.resize(ego_map_gt_i, (300, 300))
-                    frame = np.concatenate([frame, ego_map_gt_i], axis=1)
-                    # Generate ANS specific visualizations
-                    environment_layout = asnumpy(
-                        ground_truth_states["environment_layout"][0]
-                    )  # (2, H, W)
-                    visible_occupancy = asnumpy(
-                        ground_truth_states["visible_occupancy"][0]
-                    )  # (2, H, W)
-                    curr_gt_poses = gt_agent_poses_over_time[0]
-                    anticipated_occupancy = asnumpy(
-                        state_estimates["map_states"][0]
-                    )  # (2, H, W)
-                    curr_pred_poses = pred_agent_poses_over_time[0]
-
-                    H = frame.shape[0]
-                    visible_occupancy_vis = generate_topdown_allocentric_map(
-                        environment_layout,
-                        visible_occupancy,
-                        curr_gt_poses,
-                        thresh_explored=ans_cfg.thresh_explored,
-                        thresh_obstacle=ans_cfg.thresh_obstacle,
-                    )
-                    visible_occupancy_vis = cv2.resize(
-                        visible_occupancy_vis, (H, H)
-                    )
-                    anticipated_occupancy_vis = generate_topdown_allocentric_map(
-                        environment_layout,
-                        anticipated_occupancy,
-                        curr_pred_poses,
-                        thresh_explored=ans_cfg.thresh_explored,
-                        thresh_obstacle=ans_cfg.thresh_obstacle,
-                    )
-                    anticipated_occupancy_vis = cv2.resize(
-                        anticipated_occupancy_vis, (H, H)
-                    )
-                    anticipated_action_map = generate_topdown_allocentric_map(
-                        environment_layout,
-                        anticipated_occupancy,
-                        curr_pred_poses,
-                        zoom=False,
-                        thresh_explored=ans_cfg.thresh_explored,
-                        thresh_obstacle=ans_cfg.thresh_obstacle,
-                    )
-                    global_goals = self.ans_net.states["curr_global_goals"]
-                    local_goals = self.ans_net.states["curr_local_goals"]
-                    if global_goals is not None:
-                        cX = int(global_goals[0, 0].item())
-                        cY = int(global_goals[0, 1].item())
-                        anticipated_action_map = cv2.circle(
-                            anticipated_action_map,
-                            (cX, cY),
-                            10,
-                            (255, 0, 0),
-                            -1,
-                        )
-                    if local_goals is not None:
-                        cX = int(local_goals[0, 0].item())
-                        cY = int(local_goals[0, 1].item())
-                        anticipated_action_map = cv2.circle(
-                            anticipated_action_map,
-                            (cX, cY),
-                            10,
-                            (0, 255, 255),
-                            -1,
-                        )
-                    anticipated_action_map = cv2.resize(
-                        anticipated_action_map, (H, H)
-                    )
-
-                    maps_vis = np.concatenate(
-                        [
-                            visible_occupancy_vis,
-                            anticipated_occupancy_vis,
-                            anticipated_action_map,
-                            np.zeros(
-                                [
-                                    frame.shape[0],
-                                    frame.shape[1] - visible_occupancy_vis.shape[1] - anticipated_occupancy_vis.shape[1] - anticipated_action_map.shape[1],
-                                    3
-                                 ]
-                            ),
-                        ],
-                        axis=1,
-                    )
-
-                    pose_hat_final = state_estimates["pose_estimates"]  # (bs, 3)
-                    pose_gt_final = ground_truth_states["pose"]  # (bs, 3)
-                    curr_pose_estimation_metrics = measure_pose_estimation_performance(
-                        pose_hat_final, pose_gt_final, reduction="sum",
-                    )
-
-                    frame = np.concatenate([frame, maps_vis], axis=0)
-
-                    if self.config.DRAW_METRICS:
-                        frame = np.pad(frame, ((40, 0), (0, 0), (0, 0)), mode='constant', constant_values=255)
-
-                        img = Image.fromarray(np.clip(frame, 0, 255).astype(np.uint8))
-                        draw = ImageDraw.Draw(img)
-
-                        metrics_text = (
-                            f"gt: {str(np.round(pose_gt_final.cpu().numpy(), 3))}, "
-                            f"pred: {str(np.round(pose_hat_final.cpu().numpy(), 3))}, "
-                            f"translation_e: {np.round(curr_pose_estimation_metrics['translation_error'], 3)}, "
-                            f"rotation_e: {np.round(curr_pose_estimation_metrics['angular_error'], 3)}"
-                        )
-
-                        draw.text(
-                            xy=(5, 5),
-                            text=metrics_text,
-                            fill='rgb(0, 0, 0)',
-                            font=ImageFont.truetype(os.environ['UBUNTU_MONO_FONT_PATH'], size=20)
-                        )
-
-                        frame = np.array(img)
-
-                    rgb_frames[0].append(frame)
+                # else:
+                #     frame = observations_to_image(
+                #         observations[0], infos[0], observation_size=300
+                #     )
+                #     # Add ego_map_gt to frame
+                #     ego_map_gt_i = asnumpy(batch["ego_map_gt"][0])  # (2, H, W)
+                #     ego_map_gt_i = convert_gt2channel_to_gtrgb(ego_map_gt_i)
+                #     ego_map_gt_i = cv2.resize(ego_map_gt_i, (300, 300))
+                #     frame = np.concatenate([frame, ego_map_gt_i], axis=1)
+                #     # Generate ANS specific visualizations
+                #     environment_layout = asnumpy(
+                #         ground_truth_states["environment_layout"][0]
+                #     )  # (2, H, W)
+                #     visible_occupancy = asnumpy(
+                #         ground_truth_states["visible_occupancy"][0]
+                #     )  # (2, H, W)
+                #     curr_gt_poses = gt_agent_poses_over_time[0]
+                #     anticipated_occupancy = asnumpy(
+                #         state_estimates["map_states"][0]
+                #     )  # (2, H, W)
+                #     curr_pred_poses = pred_agent_poses_over_time[0]
+                #
+                #     H = frame.shape[0]
+                #     visible_occupancy_vis = generate_topdown_allocentric_map(
+                #         environment_layout,
+                #         visible_occupancy,
+                #         curr_gt_poses,
+                #         thresh_explored=ans_cfg.thresh_explored,
+                #         thresh_obstacle=ans_cfg.thresh_obstacle,
+                #     )
+                #     visible_occupancy_vis = cv2.resize(
+                #         visible_occupancy_vis, (H, H)
+                #     )
+                #     anticipated_occupancy_vis = generate_topdown_allocentric_map(
+                #         environment_layout,
+                #         anticipated_occupancy,
+                #         curr_pred_poses,
+                #         thresh_explored=ans_cfg.thresh_explored,
+                #         thresh_obstacle=ans_cfg.thresh_obstacle,
+                #     )
+                #     anticipated_occupancy_vis = cv2.resize(
+                #         anticipated_occupancy_vis, (H, H)
+                #     )
+                #     anticipated_action_map = generate_topdown_allocentric_map(
+                #         environment_layout,
+                #         anticipated_occupancy,
+                #         curr_pred_poses,
+                #         zoom=False,
+                #         thresh_explored=ans_cfg.thresh_explored,
+                #         thresh_obstacle=ans_cfg.thresh_obstacle,
+                #     )
+                #     global_goals = self.ans_net.states["curr_global_goals"]
+                #     local_goals = self.ans_net.states["curr_local_goals"]
+                #     if global_goals is not None:
+                #         cX = int(global_goals[0, 0].item())
+                #         cY = int(global_goals[0, 1].item())
+                #         anticipated_action_map = cv2.circle(
+                #             anticipated_action_map,
+                #             (cX, cY),
+                #             10,
+                #             (255, 0, 0),
+                #             -1,
+                #         )
+                #     if local_goals is not None:
+                #         cX = int(local_goals[0, 0].item())
+                #         cY = int(local_goals[0, 1].item())
+                #         anticipated_action_map = cv2.circle(
+                #             anticipated_action_map,
+                #             (cX, cY),
+                #             10,
+                #             (0, 255, 255),
+                #             -1,
+                #         )
+                #     anticipated_action_map = cv2.resize(
+                #         anticipated_action_map, (H, H)
+                #     )
+                #
+                #     maps_vis = np.concatenate(
+                #         [
+                #             visible_occupancy_vis,
+                #             anticipated_occupancy_vis,
+                #             anticipated_action_map,
+                #             np.zeros(
+                #                 [
+                #                     frame.shape[0],
+                #                     frame.shape[1] - visible_occupancy_vis.shape[1] - anticipated_occupancy_vis.shape[1] - anticipated_action_map.shape[1],
+                #                     3
+                #                  ]
+                #             ),
+                #         ],
+                #         axis=1,
+                #     )
+                #
+                #     pose_hat_final = state_estimates["pose_estimates"]  # (bs, 3)
+                #     pose_gt_final = ground_truth_states["pose"]  # (bs, 3)
+                #     curr_pose_estimation_metrics = measure_pose_estimation_performance(
+                #         pose_hat_final, pose_gt_final, reduction="sum",
+                #     )
+                #
+                #     frame = np.concatenate([frame, maps_vis], axis=0)
+                #
+                #     if self.config.DRAW_METRICS:
+                #         frame = np.pad(frame, ((40, 0), (0, 0), (0, 0)), mode='constant', constant_values=255)
+                #
+                #         img = Image.fromarray(np.clip(frame, 0, 255).astype(np.uint8))
+                #         draw = ImageDraw.Draw(img)
+                #
+                #         metrics_text = (
+                #             f"gt: {str(np.round(pose_gt_final.cpu().numpy(), 3))}, "
+                #             f"pred: {str(np.round(pose_hat_final.cpu().numpy(), 3))}, "
+                #             f"translation_e: {np.round(curr_pose_estimation_metrics['translation_error'], 3)}, "
+                #             f"rotation_e: {np.round(curr_pose_estimation_metrics['angular_error'], 3)}"
+                #         )
+                #
+                #         draw.text(
+                #             xy=(5, 5),
+                #             text=metrics_text,
+                #             fill='rgb(0, 0, 0)',
+                #             font=ImageFont.truetype(os.environ['UBUNTU_MONO_FONT_PATH'], size=20)
+                #         )
+                #
+                #         frame = np.array(img)
+                #
+                #     rgb_frames[0].append(frame)
 
                     # plt.imsave(f'/home/rpartsey/code/3d-navigation/related_works/occupancy_anticipation/OccupancyAnticipation/pretrained_models/occant_depth_ch/noisy/ckpt.13.pth_map_vis_debug/frames/{str(len(rgb_frames[0])).zfill(2)}_{actions_rmp.item()}.png', frame)
             # done-for
