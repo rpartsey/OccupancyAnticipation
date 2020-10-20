@@ -259,7 +259,7 @@ class Mapper(nn.Module):
         if masks is not None:
             mt_1 = mt_1 * masks.view(-1, 1, 1, 1)
         with torch.no_grad():
-            mt = self._register_map(mt_1, outputs["pt"], outputs["xt_hat"])
+            mt = self._register_map(mt_1, x["ego_map_gt_at_t"].permute(0, 3, 1, 2), outputs["xt_hat"])
         outputs["mt"] = mt
 
         return outputs

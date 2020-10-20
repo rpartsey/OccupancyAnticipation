@@ -482,6 +482,13 @@ class OccAntNavTrainer(BaseRLTrainer):
             # episode_statistics = []
             # episode_visualization_maps = []
 
+
+            egoviews = []
+            expected_egoviews = []
+            expected_egoviews_gt = []
+            pred_poses = []
+            true_poses = []
+
             # =========================== Episode loop ================================
             # images = []
             ep_start_time = time.time()
@@ -492,6 +499,10 @@ class OccAntNavTrainer(BaseRLTrainer):
                 batch = self._prepare_batch(observations)
                 if self.prev_batch is None:
                     self.prev_batch = copy.deepcopy(batch)
+
+                egoview = copy.deepcopy(batch["ego_map_gt"].permute(0, 3, 1, 2))
+                prev_global_map = copy.deepcopy(state_estimates["map_states"])
+                true_pose = copy.deepcopy(batch["pose_gt"])
 
                 prev_pose_estimates = state_estimates["pose_estimates"]
                 with torch.no_grad():
@@ -518,6 +529,19 @@ class OccAntNavTrainer(BaseRLTrainer):
 
                 if ep_step == 0:
                     state_estimates["pose_estimates"].copy_(prev_pose_estimates)
+
+                if ep_step >= 1:
+                    pred_pose = state_estimates["pose_estimates"]
+                    expected_global_map = self.ans_net.mapper._spatial_transform(prev_global_map, pred_pose, invert=True)
+                    expected_egoview = expected_global_map[:, :, 382:382+133, 414:414+133]
+                    expected_global_map_gt = self.ans_net.mapper._spatial_transform(ground_truth_states['environment_layout'], pred_pose, invert=True)
+                    expected_egoview_gt = expected_global_map_gt[:, :, 382:382+133, 414:414+133]
+
+                    egoviews.append(egoview.squeeze().cpu().numpy())
+                    expected_egoviews.append(expected_egoview.squeeze().cpu().numpy())
+                    expected_egoviews_gt.append(expected_egoview_gt.squeeze().cpu().numpy())
+                    pred_poses.append(pred_pose.cpu().numpy())
+                    true_poses.append(true_pose.cpu().numpy())
 
                 self.ep_time += 1
                 # Update prev batch
@@ -656,9 +680,25 @@ class OccAntNavTrainer(BaseRLTrainer):
                         for k, v in curr_metrics.items():
                             logger.info(f"{k:25s} : {v:10.3f}")
                         logger.info("{:25s} : {:10d}".format("episode_id", episode_id))
+                        logger.info("{:25s} : {:25s}".format("scene_id", os.path.basename(current_episodes[0].scene_id)))
                         logger.info(f"Time per episode: {mins_per_episode:.3f} mins")
                         logger.info(f"Time per step: {secs_per_step:.3f} secs")
                         logger.info(f"ETA: {eta_completion:.3f} mins")
+
+                    dest_dir = os.path.join(self.config.VIDEO_DIR, os.path.basename(current_episodes[0].scene_id), str(int(ep)).zfill(2))
+                    os.makedirs(dest_dir, exist_ok=True)
+
+                    np.save(os.path.join(dest_dir, 'egoviews.npy'), np.stack(egoviews))
+                    np.save(os.path.join(dest_dir, 'expected_egoviews.npy'), np.stack(expected_egoviews))
+                    np.save(os.path.join(dest_dir, 'expected_egoviews_gt.npy'), np.stack(expected_egoviews_gt))
+                    np.save(os.path.join(dest_dir, 'pred_poses.npy'), np.stack(pred_poses))
+                    np.save(os.path.join(dest_dir, 'true_poses.npy'), np.stack(true_poses))
+
+                    egoviews.clear()
+                    expected_egoviews.clear()
+                    expected_egoviews_gt.clear()
+                    pred_poses.clear()
+                    true_poses.clear()
 
                     # episode_visualization_maps.append(rgb_frames[0][-1])
                     # video_metrics = {}
