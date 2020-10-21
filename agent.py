@@ -269,13 +269,13 @@ def main():
     parser.add_argument("--exp-config", type=str, required=True)
     args = parser.parse_args()
 
-    config = get_config(**vars(args))
-    agent = OccAntAgent(config)
-
     if args.evaluation == "local":
         challenge = habitat.Challenge(eval_remote=False)
     else:
         challenge = habitat.Challenge(eval_remote=True)
+
+    config = get_config(args.exp_config)
+    agent = OccAntAgent(config)
 
     challenge.submit(agent)
 
