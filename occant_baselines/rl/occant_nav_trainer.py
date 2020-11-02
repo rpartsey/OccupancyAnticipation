@@ -350,7 +350,7 @@ class OccAntNavTrainer(BaseRLTrainer):
         self.mapper.load_state_dict(mapper_dict, strict=False)
         self.local_actor_critic.load_state_dict(local_dict)
 
-        # rgb_frames = [[] for _ in range(self.config.NUM_PROCESSES)]
+        rgb_frames = [[] for _ in range(self.config.NUM_PROCESSES)]
 
         if len(self.config.VIDEO_OPTION) > 0:
             os.makedirs(self.config.VIDEO_DIR, exist_ok=True)
@@ -462,25 +462,25 @@ class OccAntNavTrainer(BaseRLTrainer):
             self.ep_time = torch.zeros(self.envs.num_envs, 1, device=self.device)
 
             # # Visualization stuff
-            # gt_agent_poses_over_time = [[] for _ in range(self.config.NUM_PROCESSES)]
-            # pred_agent_poses_over_time = [[] for _ in range(self.config.NUM_PROCESSES)]
-            # gt_map_agent = asnumpy(
-            #     convert_world2map(ground_truth_states["pose"], (M, M), s)
-            # )
-            # pred_map_agent = asnumpy(
-            #     convert_world2map(state_estimates["pose_estimates"], (M, M), s)
-            # )
-            # pred_map_agent = np.concatenate(
-            #     [pred_map_agent, asnumpy(state_estimates["pose_estimates"][:, 2:3]), ],
-            #     axis=1,
-            # )
-            # for i in range(self.config.NUM_PROCESSES):
-            #     gt_agent_poses_over_time[i].append(gt_map_agent[i])
-            #     pred_agent_poses_over_time[i].append(pred_map_agent[i])
+            gt_agent_poses_over_time = [[] for _ in range(self.config.NUM_PROCESSES)]
+            pred_agent_poses_over_time = [[] for _ in range(self.config.NUM_PROCESSES)]
+            gt_map_agent = asnumpy(
+                convert_world2map(ground_truth_states["pose"], (M, M), s)
+            )
+            pred_map_agent = asnumpy(
+                convert_world2map(state_estimates["pose_estimates"], (M, M), s)
+            )
+            pred_map_agent = np.concatenate(
+                [pred_map_agent, asnumpy(state_estimates["pose_estimates"][:, 2:3]), ],
+                axis=1,
+            )
+            for i in range(self.config.NUM_PROCESSES):
+                gt_agent_poses_over_time[i].append(gt_map_agent[i])
+                pred_agent_poses_over_time[i].append(pred_map_agent[i])
 
             # Environment statistics
-            # episode_statistics = []
-            # episode_visualization_maps = []
+            episode_statistics = []
+            episode_visualization_maps = []
 
             # =========================== Episode loop ================================
             # images = []
@@ -537,27 +537,27 @@ class OccAntNavTrainer(BaseRLTrainer):
                     batch["pose_gt"],
                 )
 
-                # # Visualization stuff
-                # gt_map_agent = asnumpy(
-                #     convert_world2map(ground_truth_states["pose"], (M, M), s)
-                # )
-                # gt_map_agent = np.concatenate(
-                #     [gt_map_agent, asnumpy(ground_truth_states["pose"][:, 2:3])],
-                #     axis=1,
-                # )
-                # pred_map_agent = asnumpy(
-                #     convert_world2map(state_estimates["pose_estimates"], (M, M), s)
-                # )
-                # pred_map_agent = np.concatenate(
-                #     [
-                #         pred_map_agent,
-                #         asnumpy(state_estimates["pose_estimates"][:, 2:3]),
-                #     ],
-                #     axis=1,
-                # )
-                # for i in range(self.config.NUM_PROCESSES):
-                #     gt_agent_poses_over_time[i].append(gt_map_agent[i])
-                #     pred_agent_poses_over_time[i].append(pred_map_agent[i])
+                # Visualization stuff
+                gt_map_agent = asnumpy(
+                    convert_world2map(ground_truth_states["pose"], (M, M), s)
+                )
+                gt_map_agent = np.concatenate(
+                    [gt_map_agent, asnumpy(ground_truth_states["pose"][:, 2:3])],
+                    axis=1,
+                )
+                pred_map_agent = asnumpy(
+                    convert_world2map(state_estimates["pose_estimates"], (M, M), s)
+                )
+                pred_map_agent = np.concatenate(
+                    [
+                        pred_map_agent,
+                        asnumpy(state_estimates["pose_estimates"][:, 2:3]),
+                    ],
+                    axis=1,
+                )
+                for i in range(self.config.NUM_PROCESSES):
+                    gt_agent_poses_over_time[i].append(gt_map_agent[i])
+                    pred_agent_poses_over_time[i].append(pred_map_agent[i])
 
                 # =========================== Environment step ========================
                 outputs = self.envs.step([a[0].item() for a in actions_rmp])
@@ -660,121 +660,121 @@ class OccAntNavTrainer(BaseRLTrainer):
                         logger.info(f"Time per step: {secs_per_step:.3f} secs")
                         logger.info(f"ETA: {eta_completion:.3f} mins")
 
-                    # episode_visualization_maps.append(rgb_frames[0][-1])
-                    # video_metrics = {}
-                    # for k in ["area_seen", "mean_iou", "map_accuracy"]:
-                    #     video_metrics[k] = curr_all_metrics[k]
-                    # if len(self.config.VIDEO_OPTION) > 0:
-                    #     generate_video(
-                    #         video_option=self.config.VIDEO_OPTION,
-                    #         video_dir=self.config.VIDEO_DIR,
-                    #         images=rgb_frames[0],
-                    #         episode_id=current_episodes[0].episode_id,
-                    #         checkpoint_idx=checkpoint_index,
-                    #         metrics=video_metrics,
-                    #         tb_writer=writer,
-                    #     )
-                    #
-                    #     rgb_frames[0] = []
+                    episode_visualization_maps.append(rgb_frames[0][-1])
+                    video_metrics = {}
+                    for k in ["area_seen", "mean_iou", "map_accuracy"]:
+                        video_metrics[k] = curr_all_metrics[k]
+                    if len(self.config.VIDEO_OPTION) > 0:
+                        generate_video(
+                            video_option=self.config.VIDEO_OPTION,
+                            video_dir=self.config.VIDEO_DIR,
+                            images=rgb_frames[0],
+                            episode_id=current_episodes[0].episode_id,
+                            checkpoint_idx=checkpoint_index,
+                            metrics=video_metrics,
+                            tb_writer=writer,
+                        )
+
+                    rgb_frames[0] = []
 
                     # images_to_video(images, config.VIDEO_DIR, str(ep))
                     # For navigation, terminate episode loop when dones is called
                     break
-                # else:
-                #     frame = observations_to_image(
-                #         observations[0], infos[0], observation_size=300
-                #     )
-                #     # Add ego_map_gt to frame
-                #     ego_map_gt_i = asnumpy(batch["ego_map_gt"][0])  # (2, H, W)
-                #     ego_map_gt_i = convert_gt2channel_to_gtrgb(ego_map_gt_i)
-                #     ego_map_gt_i = cv2.resize(ego_map_gt_i, (300, 300))
-                #     frame = np.concatenate([frame, ego_map_gt_i], axis=1)
-                #     # Generate ANS specific visualizations
-                #     environment_layout = asnumpy(
-                #         ground_truth_states["environment_layout"][0]
-                #     )  # (2, H, W)
-                #     visible_occupancy = asnumpy(
-                #         ground_truth_states["visible_occupancy"][0]
-                #     )  # (2, H, W)
-                #     curr_gt_poses = gt_agent_poses_over_time[0]
-                #     anticipated_occupancy = asnumpy(
-                #         state_estimates["map_states"][0]
-                #     )  # (2, H, W)
-                #     curr_pred_poses = pred_agent_poses_over_time[0]
-                #
-                #     H = frame.shape[0]
-                #     visible_occupancy_vis = generate_topdown_allocentric_map(
-                #         environment_layout,
-                #         visible_occupancy,
-                #         curr_gt_poses,
-                #         thresh_explored=ans_cfg.thresh_explored,
-                #         thresh_obstacle=ans_cfg.thresh_obstacle,
-                #     )
-                #     visible_occupancy_vis = cv2.resize(
-                #         visible_occupancy_vis, (H, H)
-                #     )
-                #     anticipated_occupancy_vis = generate_topdown_allocentric_map(
-                #         environment_layout,
-                #         anticipated_occupancy,
-                #         curr_pred_poses,
-                #         thresh_explored=ans_cfg.thresh_explored,
-                #         thresh_obstacle=ans_cfg.thresh_obstacle,
-                #     )
-                #     anticipated_occupancy_vis = cv2.resize(
-                #         anticipated_occupancy_vis, (H, H)
-                #     )
-                #     anticipated_action_map = generate_topdown_allocentric_map(
-                #         environment_layout,
-                #         anticipated_occupancy,
-                #         curr_pred_poses,
-                #         zoom=False,
-                #         thresh_explored=ans_cfg.thresh_explored,
-                #         thresh_obstacle=ans_cfg.thresh_obstacle,
-                #     )
-                #     global_goals = self.ans_net.states["curr_global_goals"]
-                #     local_goals = self.ans_net.states["curr_local_goals"]
-                #     if global_goals is not None:
-                #         cX = int(global_goals[0, 0].item())
-                #         cY = int(global_goals[0, 1].item())
-                #         anticipated_action_map = cv2.circle(
-                #             anticipated_action_map,
-                #             (cX, cY),
-                #             10,
-                #             (255, 0, 0),
-                #             -1,
-                #         )
-                #     if local_goals is not None:
-                #         cX = int(local_goals[0, 0].item())
-                #         cY = int(local_goals[0, 1].item())
-                #         anticipated_action_map = cv2.circle(
-                #             anticipated_action_map,
-                #             (cX, cY),
-                #             10,
-                #             (0, 255, 255),
-                #             -1,
-                #         )
-                #     anticipated_action_map = cv2.resize(
-                #         anticipated_action_map, (H, H)
-                #     )
-                #
-                #     maps_vis = np.concatenate(
-                #         [
-                #             visible_occupancy_vis,
-                #             anticipated_occupancy_vis,
-                #             anticipated_action_map,
-                #             np.zeros(
-                #                 [
-                #                     frame.shape[0],
-                #                     frame.shape[1] - visible_occupancy_vis.shape[1] - anticipated_occupancy_vis.shape[1] - anticipated_action_map.shape[1],
-                #                     3
-                #                  ]
-                #             ),
-                #         ],
-                #         axis=1,
-                #     )
-                #     frame = np.concatenate([frame, maps_vis], axis=0)
-                #
-                #     rgb_frames[0].append(frame)
+                else:
+                    frame = observations_to_image(
+                        observations[0], infos[0], observation_size=300
+                    )
+                    # Add ego_map_gt to frame
+                    ego_map_gt_i = asnumpy(batch["ego_map_gt"][0])  # (2, H, W)
+                    ego_map_gt_i = convert_gt2channel_to_gtrgb(ego_map_gt_i)
+                    ego_map_gt_i = cv2.resize(ego_map_gt_i, (300, 300))
+                    frame = np.concatenate([frame, ego_map_gt_i], axis=1)
+                    # Generate ANS specific visualizations
+                    environment_layout = asnumpy(
+                        ground_truth_states["environment_layout"][0]
+                    )  # (2, H, W)
+                    visible_occupancy = asnumpy(
+                        ground_truth_states["visible_occupancy"][0]
+                    )  # (2, H, W)
+                    curr_gt_poses = gt_agent_poses_over_time[0]
+                    anticipated_occupancy = asnumpy(
+                        state_estimates["map_states"][0]
+                    )  # (2, H, W)
+                    curr_pred_poses = pred_agent_poses_over_time[0]
+
+                    H = frame.shape[0]
+                    visible_occupancy_vis = generate_topdown_allocentric_map(
+                        environment_layout,
+                        visible_occupancy,
+                        curr_gt_poses,
+                        thresh_explored=ans_cfg.thresh_explored,
+                        thresh_obstacle=ans_cfg.thresh_obstacle,
+                    )
+                    visible_occupancy_vis = cv2.resize(
+                        visible_occupancy_vis, (H, H)
+                    )
+                    anticipated_occupancy_vis = generate_topdown_allocentric_map(
+                        environment_layout,
+                        anticipated_occupancy,
+                        curr_pred_poses,
+                        thresh_explored=ans_cfg.thresh_explored,
+                        thresh_obstacle=ans_cfg.thresh_obstacle,
+                    )
+                    anticipated_occupancy_vis = cv2.resize(
+                        anticipated_occupancy_vis, (H, H)
+                    )
+                    anticipated_action_map = generate_topdown_allocentric_map(
+                        environment_layout,
+                        anticipated_occupancy,
+                        curr_pred_poses,
+                        zoom=False,
+                        thresh_explored=ans_cfg.thresh_explored,
+                        thresh_obstacle=ans_cfg.thresh_obstacle,
+                    )
+                    global_goals = self.ans_net.states["curr_global_goals"]
+                    local_goals = self.ans_net.states["curr_local_goals"]
+                    if global_goals is not None:
+                        cX = int(global_goals[0, 0].item())
+                        cY = int(global_goals[0, 1].item())
+                        anticipated_action_map = cv2.circle(
+                            anticipated_action_map,
+                            (cX, cY),
+                            10,
+                            (255, 0, 0),
+                            -1,
+                        )
+                    if local_goals is not None:
+                        cX = int(local_goals[0, 0].item())
+                        cY = int(local_goals[0, 1].item())
+                        anticipated_action_map = cv2.circle(
+                            anticipated_action_map,
+                            (cX, cY),
+                            10,
+                            (0, 255, 255),
+                            -1,
+                        )
+                    anticipated_action_map = cv2.resize(
+                        anticipated_action_map, (H, H)
+                    )
+
+                    maps_vis = np.concatenate(
+                        [
+                            visible_occupancy_vis,
+                            anticipated_occupancy_vis,
+                            anticipated_action_map,
+                            np.zeros(
+                                [
+                                    frame.shape[0],
+                                    frame.shape[1] - visible_occupancy_vis.shape[1] - anticipated_occupancy_vis.shape[1] - anticipated_action_map.shape[1],
+                                    3
+                                 ]
+                            ),
+                        ],
+                        axis=1,
+                    )
+                    frame = np.concatenate([frame, maps_vis], axis=0)
+
+                    rgb_frames[0].append(frame)
             # done-for
 
         if checkpoint_index == 0:
