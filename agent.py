@@ -8,6 +8,7 @@ import torch
 import torch.nn.functional as F
 
 import habitat
+
 from occant_baselines.config.default import get_config
 from occant_baselines.rl.ans import ActiveNeuralSLAMNavigator
 from occant_baselines.models.occant import OccupancyAnticipator
@@ -23,8 +24,6 @@ class OccAntAgent(habitat.Agent):
         # Match configs for different parts of the model as well as the simulator
         self.config = config
         self._synchronize_configs(self.config)
-
-        self._POSSIBLE_ACTIONS = config.TASK.POSSIBLE_ACTIONS  # check this line
 
         random.seed(config.PYT_RANDOM_SEED)
         np.random.seed(config.PYT_RANDOM_SEED)
@@ -42,8 +41,8 @@ class OccAntAgent(habitat.Agent):
             config = config.clone()
 
         self.ans_cfg = config.RL.ANS
-        occ_cfg = self.ans_cfg.ans_cfg.OCCUPANCY_ANTICIPATOR
-        mapper_cfg = self.ans_cfg.ans_cfg.MAPPER
+        occ_cfg = self.ans_cfg.OCCUPANCY_ANTICIPATOR
+        mapper_cfg = self.ans_cfg.MAPPER
 
         # Create occupancy anticipation model
         occupancy_model = OccupancyAnticipationWrapper(
@@ -76,6 +75,9 @@ class OccAntAgent(habitat.Agent):
         self.mapper.load_state_dict(mapper_dict, strict=False)
         self.local_actor_critic.load_state_dict(local_dict)
 
+        # Set models to evaluation
+        self.mapper.eval()
+        self.local_actor_critic.eval()
 
     def _synchronize_configs(self, config):
         config.defrost()
@@ -201,10 +203,6 @@ class OccAntAgent(habitat.Agent):
         return actions_rmp
 
     def reset(self):
-        # Set models to evaluation
-        self.mapper.eval()
-        self.local_actor_critic.eval()
-
         # Reset agent states
         M = self.ans_cfg.overall_map_size
         self.state_estimates = {
@@ -221,9 +219,7 @@ class OccAntAgent(habitat.Agent):
         self.ep_step = 0
 
     def act(self, observations):
-
-        # ============================ Action step ============================
-        batch = self._prepare_batch(observations)
+        batch = self._prepare_batch([observations])
         if self.prev_batch is None:
             self.prev_batch = copy.deepcopy(batch)
 
@@ -234,7 +230,7 @@ class OccAntAgent(habitat.Agent):
                 _,
                 mapper_outputs,
                 local_policy_outputs,
-                state_estimates,
+                self.state_estimates
             ) = self.ans_net.act(
                 batch,
                 self.prev_batch,
@@ -244,22 +240,22 @@ class OccAntAgent(habitat.Agent):
                 deterministic=self.ans_cfg.LOCAL_POLICY.deterministic_flag,
             )
             actions = local_policy_outputs["actions"]
-            # Make masks not done till reset (end of episode)
             self.not_done_masks = torch.ones(1, 1, device=self.device)
             self.prev_actions.copy_(actions)
 
         if self.ep_step == 0:
-            state_estimates["pose_estimates"].copy_(prev_pose_estimates)
+            self.state_estimates["pose_estimates"].copy_(prev_pose_estimates)
 
-        self.ep_time += 1
-        # Update prev batch
         for k, v in batch.items():
             self.prev_batch[k].copy_(v)
 
-        # Remap actions from exploration to navigation agent.
-        actions_rmp = self._remap_actions(actions)
+        self.ep_time += 1
+        self.ep_step += 1
 
-        return {"action": [a[0].item() for a in actions_rmp][0]}
+        actions_rmp = self._remap_actions(actions)
+        action = [a[0].item() for a in actions_rmp][0]
+
+        return {"action": action}
 
 
 def main():

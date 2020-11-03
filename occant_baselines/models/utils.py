@@ -55,6 +55,6 @@ def crop_map(h, x, crop_size, mode="bilinear"):
         crop_grid[:, :, :, 1] + y_pos.unsqueeze(1).unsqueeze(2)
     ) / Hby2
 
-    h_cropped = F.grid_sample(h, crop_grid, mode=mode, align_corners=True)
+    h_cropped = F.grid_sample(h, crop_grid, mode=mode)
 
     return h_cropped

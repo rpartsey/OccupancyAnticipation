@@ -4,6 +4,7 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+import copy
 import math
 import numpy as np
 
@@ -259,7 +260,7 @@ class Mapper(nn.Module):
         if masks is not None:
             mt_1 = mt_1 * masks.view(-1, 1, 1, 1)
         with torch.no_grad():
-            mt = self._register_map(mt_1, outputs["pt"], outputs["xt_hat"])
+            mt = self._register_map(mt_1, x["ego_map_gt_at_t"].permute(0, 3, 1, 2), outputs["xt_hat"])
         outputs["mt"] = mt
 
         return outputs
@@ -325,8 +326,23 @@ class Mapper(nn.Module):
             if self.config.detach_map:
                 for k in pose_inputs.keys():
                     pose_inputs[k] = pose_inputs[k].detach()
+
+            pose_inputs_copy = copy.deepcopy(pose_inputs)
             n_pose_inputs = self._transform_observations(pose_inputs, dx)
             pose_outputs = self.pose_estimator(n_pose_inputs)
+
+            if int(x['action_at_t_1'].item()) in {1, 2}:  # {TURN_LEFT, TURN_RIGHT}
+                pose_inputs_inv = dict(
+                    rgb_t_1=pose_inputs_copy['rgb_t'],
+                    rgb_t=pose_inputs_copy['rgb_t_1'],
+                    depth_t_1=pose_inputs_copy['depth_t'],
+                    depth_t=pose_inputs_copy['depth_t_1']
+                )
+                dx_inv = -dx.clone()
+                n_pose_inputs_inv = self._transform_observations(pose_inputs_inv, dx_inv)
+                pose_outputs_inv = self.pose_estimator(n_pose_inputs_inv)
+                pose_outputs['pose'] = (pose_outputs['pose'] + (-pose_outputs_inv['pose'])) / 2
+
             dx_hat = add_pose(dx, pose_outputs["pose"])
             all_pose_outputs["pose_outputs"] = pose_outputs
             # Estimate global pose
@@ -578,11 +594,11 @@ class Mapper(nn.Module):
             xys_newimg[:, :, 1] *= -1  # (bs, HW, 2)
             # ================== Apply warp to RGB, Depth images ==================
             sampler = rearrange(xys_newimg, "b (h w) f -> b h w f", h=H, w=W)
-            depth_t_1_trans = F.grid_sample(depth_t_1, sampler, padding_mode="zeros", align_corners=True)
+            depth_t_1_trans = F.grid_sample(depth_t_1, sampler, padding_mode="zeros")
             inputs["depth_t_1"] = depth_t_1_trans
             if "rgb_t_1" in inputs:
                 rgb_t_1 = inputs["rgb_t_1"]
-                rgb_t_1_trans = F.grid_sample(rgb_t_1, sampler, padding_mode="zeros", align_corners=True)
+                rgb_t_1_trans = F.grid_sample(rgb_t_1, sampler, padding_mode="zeros")
                 inputs["rgb_t_1"] = rgb_t_1_trans
 
         return inputs

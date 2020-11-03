@@ -65,8 +65,8 @@ def spatial_transform_map(p, x, invert=True, mode="bilinear"):
         Ainv = torch.inverse(Ainv)
 
     Ainv = Ainv[:, :2]
-    grid = F.affine_grid(Ainv, p.size(), align_corners=True)
-    p_trans = F.grid_sample(p, grid, mode=mode, align_corners=True)
+    grid = F.affine_grid(Ainv, p.size())
+    p_trans = F.grid_sample(p, grid, mode=mode)
 
     return p_trans
 
@@ -123,7 +123,7 @@ def crop_map(h, x, crop_size, mode="bilinear"):
         crop_grid[:, :, :, 1] + y_pos.unsqueeze(1).unsqueeze(2)
     ) / Hby2
 
-    h_cropped = F.grid_sample(h, crop_grid, mode=mode, align_corners=True)
+    h_cropped = F.grid_sample(h, crop_grid, mode=mode)
 
     return h_cropped
 
