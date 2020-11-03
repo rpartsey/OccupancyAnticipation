@@ -482,15 +482,16 @@ class OccAntNavTrainer(BaseRLTrainer):
             # episode_statistics = []
             # episode_visualization_maps = []
 
-
-            egoviews = []
-            expected_egoviews = []
-            expected_egoviews_gt = []
-            pred_poses = []
-            true_poses = []
+            poses_dr = []
+            poses_gt = []
+            poses_est = []
+            egoview_projections = []
+            expected_egomaps = []
+            expected_egomaps_gt = []
+            rgb_observations = []
+            collisions = []
 
             # =========================== Episode loop ================================
-            # images = []
             ep_start_time = time.time()
             current_episodes = self.envs.current_episodes()
             for ep_step in range(self.config.T_MAX):
@@ -500,9 +501,12 @@ class OccAntNavTrainer(BaseRLTrainer):
                 if self.prev_batch is None:
                     self.prev_batch = copy.deepcopy(batch)
 
-                egoview = copy.deepcopy(batch["ego_map_gt"].permute(0, 3, 1, 2))
+                pose_dr = copy.deepcopy(batch["pose"])  # dead reckoning
+                pose_gt = copy.deepcopy(batch["pose_gt"])  # ground truth
+                egoview_projection = copy.deepcopy(batch["ego_map_gt"].permute(0, 3, 1, 2))
                 prev_global_map = copy.deepcopy(state_estimates["map_states"])
-                true_pose = copy.deepcopy(batch["pose_gt"])
+                rgb_observation = copy.deepcopy(batch['rgb']).squeeze(0)
+                collision = observations[0]['collision_sensor'].item()
 
                 prev_pose_estimates = state_estimates["pose_estimates"]
                 with torch.no_grad():
@@ -529,19 +533,6 @@ class OccAntNavTrainer(BaseRLTrainer):
 
                 if ep_step == 0:
                     state_estimates["pose_estimates"].copy_(prev_pose_estimates)
-
-                if ep_step >= 1:
-                    pred_pose = state_estimates["pose_estimates"]
-                    expected_global_map = self.ans_net.mapper._spatial_transform(prev_global_map, pred_pose, invert=True)
-                    expected_egoview = expected_global_map[:, :, 382:382+133, 414:414+133]
-                    expected_global_map_gt = self.ans_net.mapper._spatial_transform(ground_truth_states['environment_layout'], pred_pose, invert=True)
-                    expected_egoview_gt = expected_global_map_gt[:, :, 382:382+133, 414:414+133]
-
-                    egoviews.append(egoview.squeeze().cpu().numpy())
-                    expected_egoviews.append(expected_egoview.squeeze().cpu().numpy())
-                    expected_egoviews_gt.append(expected_egoview_gt.squeeze().cpu().numpy())
-                    pred_poses.append(pred_pose.cpu().numpy())
-                    true_poses.append(true_pose.cpu().numpy())
 
                 self.ep_time += 1
                 # Update prev batch
@@ -591,19 +582,28 @@ class OccAntNavTrainer(BaseRLTrainer):
                 times_per_step.append(time.time() - step_start_time)
 
                 if ep_step == 0:
-                    environment_layout = np.stack(
-                        [info["gt_global_map"] for info in infos], axis=0
-                    )  # (bs, M, M, 2)
-                    environment_layout = rearrange(
-                        environment_layout, "b h w c -> b c h w"
-                    )  # (bs, 2, M, M)
-                    environment_layout = torch.Tensor(environment_layout).to(
-                        self.device
-                    )
+                    environment_layout = np.stack([info["gt_global_map"] for info in infos], axis=0)  # (bs, M, M, 2)
+                    environment_layout = rearrange(environment_layout, "b h w c -> b c h w")  # (bs, 2, M, M)
+                    environment_layout = torch.Tensor(environment_layout).to(self.device)
                     ground_truth_states["environment_layout"] = environment_layout
                     # Update environment statistics
                     # for i in range(self.envs.num_envs):
                     #     episode_statistics.append(infos[i]["episode_statistics"])
+
+                pose_est = state_estimates["pose_estimates"]
+                expected_egomap = self.mapper._spatial_transform(prev_global_map, pose_est, invert=True)
+                expected_egomap = expected_egomap[:, :, 382:382+133, 414:414+133]
+                expected_egomap_gt = self.mapper._spatial_transform(environment_layout, pose_est, invert=True)
+                expected_egomap_gt = expected_egomap_gt[:, :, 382:382+133, 414:414+133]
+
+                poses_dr.append(pose_dr.cpu().numpy())
+                poses_gt.append(pose_gt.cpu().numpy())
+                poses_est.append(pose_est.cpu().numpy())
+                egoview_projections.append(egoview_projection.squeeze().cpu().numpy().astype(np.uint8))
+                expected_egomaps.append(expected_egomap.squeeze().cpu().numpy().astype(np.uint8))
+                expected_egomaps_gt.append(expected_egomap_gt.squeeze().cpu().numpy().astype(np.uint8))
+                rgb_observations.append(rgb_observation.cpu().numpy().astype(np.uint8))
+                collisions.append(collision)
 
                 # TopDownMap visualizations
                 # im = observations[0]["rgb"]
@@ -685,20 +685,30 @@ class OccAntNavTrainer(BaseRLTrainer):
                         logger.info(f"Time per step: {secs_per_step:.3f} secs")
                         logger.info(f"ETA: {eta_completion:.3f} mins")
 
-                    dest_dir = os.path.join(self.config.VIDEO_DIR, os.path.basename(current_episodes[0].scene_id), str(int(ep)).zfill(2))
-                    os.makedirs(dest_dir, exist_ok=True)
+                    # if (not int(curr_metrics['success_rate'])) and curr_metrics['distance_to_goal'] < 3:
+                    scene_name = os.path.splitext(os.path.basename(current_episodes[0].scene_id))[0]
+                    scene_dir = os.path.join(self.config.VIDEO_DIR, scene_name)
+                    episode_metrics = '-'.join([f"{k}={v:.2f}" for k, v in curr_metrics.items()])
+                    episode_dir = os.path.join(scene_dir, f"{str(int(episode_id)).zfill(2)}-{episode_metrics}")
+                    os.makedirs(episode_dir, exist_ok=True)
 
-                    np.save(os.path.join(dest_dir, 'egoviews.npy'), np.stack(egoviews))
-                    np.save(os.path.join(dest_dir, 'expected_egoviews.npy'), np.stack(expected_egoviews))
-                    np.save(os.path.join(dest_dir, 'expected_egoviews_gt.npy'), np.stack(expected_egoviews_gt))
-                    np.save(os.path.join(dest_dir, 'pred_poses.npy'), np.stack(pred_poses))
-                    np.save(os.path.join(dest_dir, 'true_poses.npy'), np.stack(true_poses))
+                    np.save(os.path.join(episode_dir, 'poses_dr.npy'), np.stack(poses_dr))
+                    np.save(os.path.join(episode_dir, 'poses_gt.npy'), np.stack(poses_gt))
+                    np.save(os.path.join(episode_dir, 'poses_est.npy'), np.stack(poses_est))
+                    np.save(os.path.join(episode_dir, 'egoview_projections.npy'), np.stack(egoview_projections))
+                    np.save(os.path.join(episode_dir, 'expected_egomaps.npy'), np.stack(expected_egomaps))
+                    np.save(os.path.join(episode_dir, 'expected_egomaps_gt.npy'), np.stack(expected_egomaps_gt))
+                    np.save(os.path.join(episode_dir, 'rgb_observations.npy'), np.stack(rgb_observations))
+                    np.save(os.path.join(episode_dir, 'collisions.npy'), np.stack(collisions).astype(np.uint8))
 
-                    egoviews.clear()
-                    expected_egoviews.clear()
-                    expected_egoviews_gt.clear()
-                    pred_poses.clear()
-                    true_poses.clear()
+                    poses_dr.clear()
+                    poses_gt.clear()
+                    poses_est.clear()
+                    egoview_projections.clear()
+                    expected_egomaps.clear()
+                    expected_egomaps_gt.clear()
+                    rgb_observations.clear()
+                    collisions.clear()
 
                     # episode_visualization_maps.append(rgb_frames[0][-1])
                     # video_metrics = {}

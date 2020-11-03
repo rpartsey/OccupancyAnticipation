@@ -9,12 +9,12 @@ SENSORS: ["RGB_SENSOR", "DEPTH_SENSOR"]
 TEST_EPISODE_COUNT: -1
 T_MAX: 500
 PYT_RANDOM_SEED: 123
-VIDEO_OPTION: ["disk"]
-VIDEO_DIR: "pretrained_models/occant_depth_ch/noisy/ckpt.13.pth/video_dir"
-TENSORBOARD_DIR: "pretrained_models/occant_depth_ch/noisy/ckpt.13.pth/tb"
+VIDEO_OPTION: [] # ["disk"]
+VIDEO_DIR: "/datasets/extra_space2/rpartsey/3d-navigation/habitat/occupancy_anticipation_navigation"
+TENSORBOARD_DIR: "pretrained_models/occant_depth_ch/noisy/foo/tb"
 CHECKPOINT_FOLDER: "pretrained_models/occant_depth_ch"
 EVAL_CKPT_PATH_DIR: "pretrained_models/occant_depth_ch/ckpt.13.pth"
-LOG_FILE: "pretrained_models/occant_depth_ch/noisy/ckpt.13.pth/eval.log"
+LOG_FILE: "pretrained_models/occant_depth_ch/noisy/foo/eval.log"
 
 EVAL:
   SPLIT: "val"
