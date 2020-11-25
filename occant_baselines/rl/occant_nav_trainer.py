@@ -490,6 +490,7 @@ class OccAntNavTrainer(BaseRLTrainer):
             expected_egomaps_gt = []
             rgb_observations = []
             collisions = []
+            actions_taken = []
 
             # =========================== Episode loop ================================
             ep_start_time = time.time()
@@ -575,6 +576,8 @@ class OccAntNavTrainer(BaseRLTrainer):
                 #     pred_agent_poses_over_time[i].append(pred_map_agent[i])
 
                 # =========================== Environment step ========================
+                action_taken = [a[0].item() for a in actions_rmp][0]
+
                 outputs = self.envs.step([a[0].item() for a in actions_rmp])
 
                 observations, _, dones, infos = [list(x) for x in zip(*outputs)]
@@ -599,11 +602,12 @@ class OccAntNavTrainer(BaseRLTrainer):
                 poses_dr.append(pose_dr.cpu().numpy())
                 poses_gt.append(pose_gt.cpu().numpy())
                 poses_est.append(pose_est.cpu().numpy())
-                egoview_projections.append(egoview_projection.squeeze().cpu().numpy().astype(np.uint8))
-                expected_egomaps.append(expected_egomap.squeeze().cpu().numpy().astype(np.uint8))
-                expected_egomaps_gt.append(expected_egomap_gt.squeeze().cpu().numpy().astype(np.uint8))
+                egoview_projections.append(np.rint(egoview_projection.squeeze().cpu().numpy()).astype(np.uint8))
+                expected_egomaps.append(np.rint(expected_egomap.squeeze().cpu().numpy()).astype(np.uint8))
+                expected_egomaps_gt.append(np.rint(expected_egomap_gt.squeeze().cpu().numpy()).astype(np.uint8))
                 rgb_observations.append(rgb_observation.cpu().numpy().astype(np.uint8))
-                collisions.append(collision)
+                collisions.append(np.rint(collision).astype(np.uint8))
+                actions_taken.append(np.rint(action_taken).astype(np.uint8))
 
                 # TopDownMap visualizations
                 # im = observations[0]["rgb"]
@@ -699,7 +703,8 @@ class OccAntNavTrainer(BaseRLTrainer):
                     np.save(os.path.join(episode_dir, 'expected_egomaps.npy'), np.stack(expected_egomaps))
                     np.save(os.path.join(episode_dir, 'expected_egomaps_gt.npy'), np.stack(expected_egomaps_gt))
                     np.save(os.path.join(episode_dir, 'rgb_observations.npy'), np.stack(rgb_observations))
-                    np.save(os.path.join(episode_dir, 'collisions.npy'), np.stack(collisions).astype(np.uint8))
+                    np.save(os.path.join(episode_dir, 'collisions.npy'), np.stack(collisions))
+                    np.save(os.path.join(episode_dir, 'actions.npy'), np.stack(actions_taken))
 
                     poses_dr.clear()
                     poses_gt.clear()
@@ -709,6 +714,7 @@ class OccAntNavTrainer(BaseRLTrainer):
                     expected_egomaps_gt.clear()
                     rgb_observations.clear()
                     collisions.clear()
+                    actions_taken.clear()
 
                     # episode_visualization_maps.append(rgb_frames[0][-1])
                     # video_metrics = {}
