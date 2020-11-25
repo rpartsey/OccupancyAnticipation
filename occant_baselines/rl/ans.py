@@ -1025,10 +1025,34 @@ class ActiveNeuralSLAMNavigator(ActiveNeuralSLAMBase):
         assert M % 2 == 1, "The code is tested only for odd map sizes!"
         # =================== Update states from current observation ==================
         # Update map and pose
+        observations_copy = copy.deepcopy(observations)
+        prev_observations_copy = copy.deepcopy(prev_observations)
+        prev_state_estimates_copy = copy.deepcopy(prev_state_estimates)
+
         mapper_inputs = self._create_mapper_inputs(
-            observations, prev_observations, prev_state_estimates
+            observations_copy,
+            prev_observations_copy,
+            prev_state_estimates_copy
         )
         mapper_outputs = self.mapper(mapper_inputs)
+
+        k = 1  # correction steps
+        for i in range(k):
+            observations_copy = copy.deepcopy(observations)
+            prev_observations_copy = copy.deepcopy(prev_observations)
+            prev_state_estimates_copy = copy.deepcopy(prev_state_estimates)
+
+            observations_copy["pose"] = prev_observations_copy["pose"] + mapper_outputs['dx_hat']
+            mapper_inputs = self._create_mapper_inputs(
+                observations_copy,
+                prev_observations_copy,
+                prev_state_estimates_copy
+            )
+            mapper_outputs_corrected = self.mapper(mapper_inputs)
+
+            print('Diff:', str(mapper_outputs_corrected['xt_hat'] - mapper_outputs['xt_hat']))
+            mapper_outputs = mapper_outputs_corrected
+
         global_map = mapper_outputs["mt"]
         global_pose = mapper_outputs["xt_hat"]
         map_xy = convert_world2map(global_pose[:, :2], (M, M), s)
